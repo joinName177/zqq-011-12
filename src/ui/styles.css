@@ -124,6 +124,63 @@ body {
   border-color: var(--met-cyan);
 }
 
+.btn-export {
+  background: var(--met-card);
+  border: 1px solid var(--met-gold);
+  color: var(--met-gold);
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.btn-export:hover {
+  background: rgba(255, 190, 11, 0.12);
+  box-shadow: 0 0 12px rgba(255, 190, 11, 0.25);
+}
+
+/* Export / Share Modal */
+.export-hint {
+  font-size: 12px;
+  color: var(--met-muted);
+  margin-bottom: 12px;
+}
+
+.export-text {
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  min-height: 180px;
+  white-space: pre-wrap;
+}
+
+.export-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.export-digest {
+  font-family: monospace;
+  color: var(--met-muted);
+}
+
+.export-valid {
+  color: var(--met-cyan);
+  font-weight: 600;
+}
+
+.export-invalid {
+  color: var(--met-red);
+  font-weight: 600;
+}
+
 /* Alert Top Banner */
 .alert-banner {
   background: rgba(255, 0, 84, 0.15);

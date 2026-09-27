@@ -6,6 +6,16 @@ export interface WeatherUIHandlers {
   onResetData: () => void;
   onSubmitLog: (tag: string, intensity: number, note: string) => void;
   onSelectRecord: (record: MoodRecord) => void;
+  onOpenExport: () => void;
+  onCloseExport: () => void;
+}
+
+/** 导出/分享视图状态：与屏幕同一份数据快照派生，附带校验结果。 */
+export interface ExportViewState {
+  isOpen: boolean;
+  text: string;
+  digest: string;
+  valid: boolean;
 }
 
 export function renderWeatherApp(
@@ -15,6 +25,7 @@ export function renderWeatherApp(
   selectedTag: string,
   selectedIntensity: number,
   noteText: string,
+  exportView: ExportViewState,
   handlers: WeatherUIHandlers,
   onCloseModal: () => void,
   onTagChange: (tag: string) => void,
@@ -120,6 +131,7 @@ export function renderWeatherApp(
         </div>
         <div class="met-header-actions">
           <button class="btn-reset" id="btnReset">🔄 重置示例气象序列</button>
+          <button class="btn-export" id="btnOpenExport">📤 导出/分享气象报告</button>
           <button class="btn-record-mood" id="btnOpenLog">✍️ 记录今日心情天气</button>
         </div>
       </header>
@@ -187,7 +199,7 @@ export function renderWeatherApp(
 
           <!-- Recent Days Sequence Strip -->
           <div class="timeline-section">
-            <h3>📅 近期气象观测序列 (点击切换观测标本)</h3>
+            <h3>📅 近期气象观测序列 (点击切换当前观测标本)</h3>
             <div class="records-strip">
               ${chartData.records
                 .map(
@@ -324,12 +336,40 @@ export function renderWeatherApp(
       `
           : ''
       }
+
+      <!-- Modal: Export / Share Unified Weather Report -->
+      ${
+        exportView.isOpen
+          ? `
+        <div class="modal-backdrop" id="exportBackdrop">
+          <div class="modal-dialog">
+            <h3>📤 导出 / 分享情绪气象报告</h3>
+            <p class="export-hint">以下内容与当前屏幕天气图、气压带说明及预警指南来自同一份数据快照。</p>
+            <textarea class="form-textarea export-text" id="exportText" readonly>${esc(exportView.text)}</textarea>
+            <div class="export-meta">
+              <span class="export-digest">校验码：${exportView.digest}</span>
+              ${
+                exportView.valid
+                  ? '<span class="export-valid">✅ 导出校验通过 · 与当前屏幕快照一致</span>'
+                  : '<span class="export-invalid">❌ 导出校验失败 · 内容已被修改</span>'
+              }
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn-reset" id="btnCloseExport">关闭</button>
+              <button type="button" class="btn-record-mood" id="btnCopyExport">📋 复制报告文本</button>
+            </div>
+          </div>
+        </div>
+      `
+          : ''
+      }
     </div>
   `;
 
   // Attach event listeners
   container.querySelector('#btnOpenLog')?.addEventListener('click', handlers.onOpenLogModal);
   container.querySelector('#btnReset')?.addEventListener('click', handlers.onResetData);
+  container.querySelector('#btnOpenExport')?.addEventListener('click', handlers.onOpenExport);
 
   container.querySelectorAll('.record-pill').forEach(pill => {
     pill.addEventListener('click', () => {
@@ -370,6 +410,39 @@ export function renderWeatherApp(
 
     container.querySelector('#btnSubmitModal')?.addEventListener('click', () => {
       handlers.onSubmitLog(selectedTag, selectedIntensity, noteText);
+    });
+  }
+
+  if (exportView.isOpen) {
+    container.querySelector('#btnCloseExport')?.addEventListener('click', handlers.onCloseExport);
+    container.querySelector('#exportBackdrop')?.addEventListener('click', e => {
+      if (e.target === container.querySelector('#exportBackdrop')) {
+        handlers.onCloseExport();
+      }
+    });
+
+    const exportBox = container.querySelector('#exportText') as HTMLTextAreaElement;
+    const copyBtn = container.querySelector('#btnCopyExport') as HTMLButtonElement;
+    copyBtn?.addEventListener('click', () => {
+      const markCopied = () => {
+        if (copyBtn) {
+          copyBtn.textContent = '✅ 已复制';
+          setTimeout(() => {
+            copyBtn.textContent = '📋 复制报告文本';
+          }, 1500);
+        }
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(exportView.text).then(markCopied, () => {
+          exportBox?.select();
+          document.execCommand('copy');
+          markCopied();
+        });
+      } else {
+        exportBox?.select();
+        document.execCommand('copy');
+        markCopied();
+      }
     });
   }
 }

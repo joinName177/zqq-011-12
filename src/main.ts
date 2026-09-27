@@ -2,7 +2,8 @@ import './ui/styles.css';
 import { LocalStorageMoodAdapter } from './adapters/local-storage-mood.adapter';
 import { MeteorologyEngineAdapter } from './adapters/meteorology-engine.adapter';
 import { createRecordFromTag } from './core/meteorology-engine';
-import { MoodRecord, SynopticChartData } from './core/models';
+import { MoodRecord } from './core/models';
+import { verifyExportText } from './core/weather-snapshot';
 import { renderWeatherApp } from './ui/app';
 import { summarizeMood, chartSummary } from './core/mood-summary';
 import { moodTelemetry } from './adapters/mood-telemetry';
@@ -12,33 +13,59 @@ const repo = new LocalStorageMoodAdapter();
 const metEngine = new MeteorologyEngineAdapter();
 
 let records = repo.getAll();
-let chartData: SynopticChartData = metEngine.generateSynopticChart(records);
+// 当前选择：全应用唯一事实来源，屏幕遥测、预警指南与导出内容共用。
+let selectedRecordId: string | null = null;
+// 统一输出模型：每次状态变化重建一次快照，所有输出读取同一份。
+let snapshot = metEngine.generateSnapshot(records, selectedRecordId);
 
 let isModalOpen = false;
+let isExportOpen = false;
 let selectedTag = '阴转多云';
 let selectedIntensity = 5;
 let noteText = '';
 
 const rootEl = document.getElementById('app')!;
-const bugSurface = buildBugSurface([records.length, chartData.zones.length]);
-rootEl.dataset.moodSummary = JSON.stringify({
-  summary: summarizeMood(records),
-  chart: chartSummary(chartData),
-  telemetry: moodTelemetry('initial'),
-  bugSurface,
-  preembeddedBugCount: bugSurface.bugs.length,
-  hellBugCount: bugSurface.bugs.filter((bug) => bug.level === 'hell').length,
-  difficultBugCount: bugSurface.bugs.filter((bug) => bug.level === 'difficult').length
-});
+
+// 导出/分享载荷：与屏幕渲染使用同一 snapshot，并在每次状态变化后同步刷新，
+// 保证预览、详情与导出结果永远来自同一数据快照。
+function syncExportDataset() {
+  const bugSurface = buildBugSurface([snapshot.records.length, snapshot.chart.zones.length]);
+  rootEl.dataset.moodSummary = JSON.stringify({
+    summary: summarizeMood(snapshot.records),
+    chart: chartSummary(snapshot.chart),
+    currentSelection: snapshot.selectedRecordId,
+    telemetry: moodTelemetry('initial'),
+    bugSurface,
+    preembeddedBugCount: bugSurface.bugs.length,
+    hellBugCount: bugSurface.bugs.filter((bug) => bug.level === 'hell').length,
+    difficultBugCount: bugSurface.bugs.filter((bug) => bug.level === 'difficult').length,
+    export: {
+      text: snapshot.exportText,
+      digest: snapshot.exportDigest,
+      valid: verifyExportText(snapshot.exportText)
+    }
+  });
+}
 
 function refreshView() {
+  snapshot = metEngine.generateSnapshot(records, selectedRecordId);
+  // 选择可能因数据重置/替换而失效，回写归一化后的当前选择。
+  selectedRecordId = snapshot.selectedRecordId;
+  syncExportDataset();
+
   renderWeatherApp(
     rootEl,
-    chartData,
+    snapshot.chart,
     isModalOpen,
     selectedTag,
     selectedIntensity,
     noteText,
+    {
+      isOpen: isExportOpen,
+      text: snapshot.exportText,
+      digest: snapshot.exportDigest,
+      valid: verifyExportText(snapshot.exportText)
+    },
     {
       onOpenLogModal: () => {
         isModalOpen = true;
@@ -49,7 +76,7 @@ function refreshView() {
       },
       onResetData: () => {
         records = repo.resetToSample();
-        chartData = metEngine.generateSynopticChart(records);
+        selectedRecordId = null;
         refreshView();
       },
       onSubmitLog: (tag: string, intensity: number, note: string) => {
@@ -57,15 +84,22 @@ function refreshView() {
         const newRecord = createRecordFromTag(tag, intensity, note, todayStr);
         repo.add(newRecord);
         records = repo.getAll();
-        chartData = metEngine.generateSynopticChart(records);
+        selectedRecordId = newRecord.id;
         isModalOpen = false;
         refreshView();
       },
       onSelectRecord: (record: MoodRecord) => {
-        // Re-generate chart focusing on this record
-        const filtered = records.filter(r => r.date <= record.date);
-        chartData = metEngine.generateSynopticChart(filtered.length > 0 ? filtered : records);
-        chartData.currentRecord = record;
+        // 仅切换当前观测标本；统计窗口与记录序列保持不变，
+        // 屏幕、气压带、预警与导出自动收敛到同一快照。
+        selectedRecordId = record.id;
+        refreshView();
+      },
+      onOpenExport: () => {
+        isExportOpen = true;
+        refreshView();
+      },
+      onCloseExport: () => {
+        isExportOpen = false;
         refreshView();
       }
     },

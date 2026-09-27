@@ -6,6 +6,7 @@ import {
   ExtremeWeatherAlert,
   SynopticChartData
 } from './models';
+import { computeDigest } from './digest';
 
 export const TAG_METAS: Record<string, MoodTagMeta> = {
   '晴空万里': {
@@ -119,12 +120,15 @@ export function createRecordFromTag(tag: string, intensity: number, note: string
   };
 }
 
-export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData {
+export function evaluateSynopticSystem(records: MoodRecord[], currentRecordOverride?: MoodRecord): SynopticChartData {
   const sorted = [...records].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const currentRecord = sorted[sorted.length - 1] || createRecordFromTag('阴转多云', 5, '默认天气');
+  // 当前观测标本：优先采用外部统一选中的记录，其次最新一条，空序列时退化为默认观测。
+  const currentRecord = currentRecordOverride ?? sorted[sorted.length - 1] ?? createRecordFromTag('阴转多云', 5, '默认天气');
+  // 统计窗口：全部输出（屏幕 / 气压带 / 预警 / 导出）共用同一份记录序列。
+  const statRecords = sorted.length > 0 ? sorted : [currentRecord];
 
-  const totalPressure = sorted.reduce((acc, r) => acc + r.pressureHpa, 0);
-  const avgPressure = Math.round(totalPressure / sorted.length);
+  const totalPressure = statRecords.reduce((acc, r) => acc + r.pressureHpa, 0);
+  const avgPressure = Math.round(totalPressure / statRecords.length);
 
   // Barometric zones analysis
   let equatorial = 0; // high intensity + low/moderate pressure
@@ -132,14 +136,14 @@ export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData
   let subPolar = 0; // low pressure sad/fog
   let polarCold = 0; // high pressure freezing/detached
 
-  sorted.forEach(r => {
+  statRecords.forEach(r => {
     if (r.pressureHpa >= 1020 && r.temperatureC > 15) subTropical++;
     else if (r.pressureHpa >= 1020 && r.temperatureC <= 10) polarCold++;
     else if (r.pressureHpa <= 995) subPolar++;
     else equatorial++;
   });
 
-  const total = sorted.length || 1;
+  const total = statRecords.length || 1;
   const zones: BarometricZone[] = [
     {
       code: 'Z-STH',
@@ -180,7 +184,7 @@ export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData
   ];
 
   // Monsoon trend analysis
-  const recentSlice = sorted.slice(-7);
+  const recentSlice = statRecords.slice(-7);
   const avgIntensity = recentSlice.reduce((s, r) => s + r.intensity, 0) / (recentSlice.length || 1);
   const hasStorm = recentSlice.some(r => r.pressureHpa < 985);
 
@@ -273,11 +277,17 @@ export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData
   else if (alerts.length > 0) pressureSystemType = '锋面气旋多变';
   else pressureSystemType = '深槽低气压阴霾';
 
+  // 图编号由记录内容与当前选择派生：同一数据快照在任何输出中复现同一编号，
+  // 保证屏幕天气图与导出/分享内容可互相校验。
+  const chartId = `SYN-${computeDigest(
+    statRecords.map(r => `${r.date}#${r.tag}#${r.pressureHpa}#${r.intensity}`).join('|') + `@${currentRecord.id}`
+  )}`;
+
   return {
-    chartId: `SYN-${Date.now().toString(36).toUpperCase()}`,
+    chartId,
     generatedDate: new Date().toLocaleDateString('zh-CN'),
     currentRecord,
-    records: sorted,
+    records: statRecords,
     averagePressure: avgPressure,
     zones,
     monsoon,
