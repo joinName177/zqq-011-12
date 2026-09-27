@@ -3,7 +3,7 @@ import { evaluateSynopticSystem } from '../core/meteorology-engine';
 import { MeteorologyPort } from '../ports/meteorology.port';
 
 export class MeteorologyEngineAdapter implements MeteorologyPort {
-  generateSynopticChart(records: MoodRecord[]): SynopticChartData {
-    return evaluateSynopticSystem(records);
+  generateSynopticChart(records: readonly MoodRecord[], focusRecordId?: string): SynopticChartData {
+    return evaluateSynopticSystem(records, focusRecordId);
   }
 }

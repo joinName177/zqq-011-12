@@ -1,11 +1,15 @@
 import { SynopticChartData, MoodRecord } from '../core/models';
-import { TAG_METAS } from '../core/meteorology-engine';
+import { TAG_METAS, DEFAULT_TAG } from '../core/meteorology-engine';
+import { escapeHtml, MOOD_LIMITS } from '../core/format';
+import { prepareExport } from '../core/export-share';
 
 export interface WeatherUIHandlers {
   onOpenLogModal: () => void;
   onResetData: () => void;
   onSubmitLog: (tag: string, intensity: number, note: string) => void;
   onSelectRecord: (record: MoodRecord) => void;
+  /** 从历史标本返回最新一条，但统计窗口始终保持全周期 */
+  onFocusLatest: () => void;
 }
 
 export function renderWeatherApp(
@@ -22,10 +26,11 @@ export function renderWeatherApp(
   onNoteChange: (val: string) => void
 ) {
   const cur = chartData.currentRecord;
-  const meta = TAG_METAS[cur.tag] || TAG_METAS['阴转多云'];
+  const meta = TAG_METAS[cur.tag] || TAG_METAS[DEFAULT_TAG];
+  const esc = escapeHtml;
 
-  const esc = (s: string) =>
-    s.replace(/[&<>'"]/g, t => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[t] || t));
+  // 导出 / 分享与屏幕使用同一份统观快照，并执行统一校验
+  const exportPrep = prepareExport(chartData);
 
   // Generate Isobar SVG paths dynamically based on records
   const isobarsSvg = `
@@ -108,6 +113,8 @@ export function renderWeatherApp(
     </svg>
   `;
 
+  const stats = chartData.statistics;
+
   container.innerHTML = `
     <div class="met-app">
       <header class="met-header">
@@ -119,13 +126,24 @@ export function renderWeatherApp(
           </div>
         </div>
         <div class="met-header-actions">
-          <button class="btn-reset" id="btnReset">🔄 重置示例气象序列</button>
-          <button class="btn-record-mood" id="btnOpenLog">✍️ 记录今日心情天气</button>
+          <button class="btn-reset" id="btnReset" type="button">🔄 重置示例气象序列</button>
+          <button class="btn-record-mood" id="btnOpenLog" type="button">✍️ 记录今日心情天气</button>
         </div>
       </header>
 
       ${
-        chartData.alerts.length > 0
+        chartData.isEmpty
+          ? `
+        <div class="empty-banner">
+          <strong>🌫️ 暂无观测标本</strong>
+          <span>当前心境空域处于静稳空窗，天气图 / 气压带 / 预警 / 导出已统一进入安全空态。点击「记录今日心情天气」开始观测。</span>
+        </div>
+      `
+          : ''
+      }
+
+      ${
+        !chartData.isEmpty && chartData.alerts.length > 0
           ? `
         <div class="alert-banner">
           <div class="alert-banner-left">
@@ -133,7 +151,7 @@ export function renderWeatherApp(
             <strong>${esc(chartData.alerts[0].title)}</strong>
             <span style="font-size:13px;color:var(--met-text);">${esc(chartData.alerts[0].triggerCause)}</span>
           </div>
-          <span style="font-size:12px;color:var(--met-muted);">${chartData.alerts[0].issuedTime} 发布</span>
+          <span style="font-size:12px;color:var(--met-muted);">${esc(chartData.alerts[0].issuedTime)} 发布 · 对应当前标本 ${esc(cur.date)}</span>
         </div>
       `
           : ''
@@ -145,8 +163,26 @@ export function renderWeatherApp(
           <div class="box-title">
             <h2>🌐 个人专属情绪综观天气图 (Synoptic Chart)</h2>
             <span style="font-size:12px;color:var(--met-muted);font-family:monospace;">
-              ${chartData.chartId} · ${chartData.generatedDate}
+              ${esc(chartData.chartId)} · ${esc(chartData.generatedDate)} · 全窗口 ${chartData.windowSize} 条
             </span>
+          </div>
+
+          <!-- Current Selection Identity (single source of truth) -->
+          <div class="focus-bar ${chartData.focusIsLatest ? 'is-latest' : 'is-history'}">
+            <div class="focus-bar-main">
+              <span class="focus-dot">📍</span>
+              <strong>${chartData.isEmpty ? '当前无真实标本（静稳占位）' : `当前标本：${esc(cur.date)} · ${esc(cur.tag)}`}</strong>
+              <span class="focus-sub">
+                ${
+                  chartData.isEmpty
+                    ? '统计窗口为空'
+                    : chartData.focusIsLatest
+                      ? '即全周期最新一条观测'
+                      : '历史标本 · 预警与导出均针对此条；统计仍基于全窗口'
+                }
+              </span>
+            </div>
+            ${!chartData.isEmpty && !chartData.focusIsLatest ? '<button class="btn-reset" id="btnFocusLatest" type="button">↩ 返回最新标本</button>' : ''}
           </div>
 
           <!-- Current Telemetry -->
@@ -168,13 +204,13 @@ export function renderWeatherApp(
             </div>
             <div class="telemetry-card">
               <div class="lbl">思绪风场 (Wind Field)</div>
-              <div class="val" style="color:#fff;">${cur.windDirectionName}风</div>
+              <div class="val" style="color:#fff;">${esc(cur.windDirectionName)}风</div>
               <div class="lbl">${cur.windSpeedKmH} km/h</div>
             </div>
           </div>
 
           <!-- SVG Weather Map -->
-          <div class="synoptic-map-wrap">
+          <div class="synoptic-map-wrap ${chartData.isEmpty ? 'is-empty' : ''}">
             ${isobarsSvg}
           </div>
 
@@ -188,28 +224,37 @@ export function renderWeatherApp(
           <!-- Recent Days Sequence Strip -->
           <div class="timeline-section">
             <h3>📅 近期气象观测序列 (点击切换观测标本)</h3>
-            <div class="records-strip">
-              ${chartData.records
-                .map(
-                  r => `
-                <div class="record-pill ${r.id === cur.id ? 'active' : ''}" data-id="${r.id}">
-                  <div class="pill-date">${r.date.slice(5)}</div>
-                  <div class="pill-icon">${(TAG_METAS[r.tag] || TAG_METAS['阴转多云']).icon}</div>
+            <div class="window-stat">
+              全窗口 ${chartData.windowSize} 条 · 平均强度 ${stats.averageIntensity.toFixed(1)} 级 · 平均气压 ${stats.averagePressure} hPa · 主导标签 ${esc(stats.dominantTag)}
+            </div>
+            <div class="records-strip" role="listbox" aria-label="气象观测标本">
+              ${
+                chartData.records.length === 0
+                  ? '<div class="strip-empty">尚无观测标本</div>'
+                  : chartData.records
+                      .map(
+                        r => `
+                <button type="button" role="option" aria-selected="${r.id === chartData.focusRecordId}"
+                  class="record-pill ${r.id === chartData.focusRecordId ? 'active' : ''}" data-id="${r.id}">
+                  <div class="pill-date">${esc(r.date.slice(5))}</div>
+                  <div class="pill-icon">${(TAG_METAS[r.tag] || TAG_METAS[DEFAULT_TAG]).icon}</div>
                   <div class="pill-tag">${esc(r.tag)}</div>
                   <div class="pill-pressure">${r.pressureHpa} hPa</div>
-                </div>
+                </button>
               `
-                )
-                .join('')}
+                      )
+                      .join('')
+              }
             </div>
           </div>
         </main>
 
-        <!-- Right: Zones, Monsoon, Alerts -->
+        <!-- Right: Zones, Monsoon, Alerts, Export/Share -->
         <aside class="right-column">
           <!-- Barometric Zones -->
           <section class="side-panel">
             <h3>🧭 情绪气压带分布</h3>
+            <div class="panel-window-note">统计口径：全窗口 ${chartData.windowSize} 条 · 平均气压 ${stats.averagePressure} hPa</div>
             <div class="zone-list">
               ${chartData.zones
                 .map(
@@ -240,7 +285,7 @@ export function renderWeatherApp(
               </div>
               <div class="monsoon-meta">
                 <div>流场源动力：${esc(chartData.monsoon.originSource)}</div>
-                <div>流动强度：${chartData.monsoon.flowSpeed}</div>
+                <div>流动强度：${esc(chartData.monsoon.flowSpeed)} · 近 ${chartData.monsoon.frequencyDays} 日窗口</div>
               </div>
               <div class="monsoon-forecast-box">
                 <strong>未来三日气象推演：</strong>
@@ -264,6 +309,7 @@ export function renderWeatherApp(
                         <span class="alert-level-badge" style="background:rgba(255,255,255,0.1);color:#fff;">${a.level}</span>
                       </div>
                       <div class="alert-cause">${esc(a.triggerCause)}</div>
+                      <div class="alert-issued">🗓️ 对应标本 ${esc(a.issuedTime)}</div>
                       <div class="defense-guide-title">🛡️ 防灾避险自愈协议：</div>
                       <ul class="defense-list">
                         ${a.defenseProtocol.map(p => `<li>${esc(p)}</li>`).join('')}
@@ -274,11 +320,43 @@ export function renderWeatherApp(
                       .join('')
                   : `
                     <div style="font-size:13px;color:var(--met-muted);background:var(--met-card);padding:14px;border-radius:8px;">
-                      ✅ 当前心境空域晴朗，无活动极端灾害天气警报。
+                      ✅ ${chartData.isEmpty ? '暂无标本，无预警。' : '当前心境空域晴朗，无活动极端灾害天气警报。'}
                     </div>
                   `
               }
             </div>
+          </section>
+
+          <!-- Unified Export / Share -->
+          <section class="side-panel">
+            <h3>📤 导出 / 分享（与屏幕同快照）</h3>
+            <div class="export-check ${exportPrep.ok ? 'ok' : 'fail'}">
+              ${
+                exportPrep.ok
+                  ? '<span class="check-flag">✅ 校验通过</span>'
+                  : '<span class="check-flag">⛔ 校验未通过</span>'
+              }
+              <span class="check-meta">${exportPrep.ok ? `${exportPrep.sizeBytes} 字节 · checksum ${exportPrep.payload?.checksum ?? ''}` : '已阻止导出'}</span>
+            </div>
+            ${
+              exportPrep.errors.length > 0
+                ? `<ul class="export-msgs err">${exportPrep.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`
+                : ''
+            }
+            ${
+              exportPrep.warnings.length > 0
+                ? `<ul class="export-msgs warn">${exportPrep.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`
+                : ''
+            }
+            <details class="export-preview" ${exportPrep.ok ? 'open' : ''}>
+              <summary>预览分享文本</summary>
+              <pre class="share-text">${esc(exportPrep.shareText)}</pre>
+            </details>
+            <div class="export-actions">
+              <button type="button" class="btn-reset" id="btnShare" ${exportPrep.ok ? '' : 'disabled'}>🔗 复制分享文本</button>
+              <button type="button" class="btn-record-mood" id="btnExport" ${exportPrep.ok ? '' : 'disabled'}>⬇️ 下载 JSON 快照</button>
+            </div>
+            <div class="export-status" id="exportStatus" role="status" aria-live="polite"></div>
           </section>
         </aside>
       </div>
@@ -288,15 +366,15 @@ export function renderWeatherApp(
         isModalOpen
           ? `
         <div class="modal-backdrop" id="modalBackdrop">
-          <div class="modal-dialog">
+          <div class="modal-dialog" role="dialog" aria-modal="true" aria-label="今日心情气象签到">
             <h3>✍️ 今日心情气象签到</h3>
-            
+
             <label style="font-size:12px;color:var(--met-muted);display:block;margin-bottom:8px;">选择今日核心气象标签：</label>
             <div class="tag-selector-grid">
               ${Object.values(TAG_METAS)
                 .map(
                   m => `
-                <button type="button" class="tag-btn ${m.tag === selectedTag ? 'active' : ''}" data-tag="${m.tag}">
+                <button type="button" class="tag-btn ${m.tag === selectedTag ? 'active' : ''}" data-tag="${m.tag}" aria-pressed="${m.tag === selectedTag}">
                   <span style="font-size:16px;">${m.icon}</span>
                   <span>${m.tag}</span>
                 </button>
@@ -311,8 +389,8 @@ export function renderWeatherApp(
             </div>
 
             <div class="form-group">
-              <label>观测记录与心绪注记：</label>
-              <textarea class="form-textarea" id="noteInput" placeholder="写下引起今天气压变化的事情或思绪...">${esc(noteText)}</textarea>
+              <label>观测记录与心绪注记（最多 ${MOOD_LIMITS.noteMaxLength} 字）：</label>
+              <textarea class="form-textarea" id="noteInput" maxlength="${MOOD_LIMITS.noteMaxLength}" placeholder="写下引起今天气压变化的事情或思绪...">${esc(noteText)}</textarea>
             </div>
 
             <div class="modal-footer">
@@ -330,13 +408,67 @@ export function renderWeatherApp(
   // Attach event listeners
   container.querySelector('#btnOpenLog')?.addEventListener('click', handlers.onOpenLogModal);
   container.querySelector('#btnReset')?.addEventListener('click', handlers.onResetData);
+  container.querySelector('#btnFocusLatest')?.addEventListener('click', handlers.onFocusLatest);
 
   container.querySelectorAll('.record-pill').forEach(pill => {
     pill.addEventListener('click', () => {
       const id = pill.getAttribute('data-id');
       const rec = chartData.records.find(r => r.id === id);
-      if (rec) handlers.onSelectRecord(rec);
+      if (rec && id !== chartData.focusRecordId) handlers.onSelectRecord(rec);
     });
+  });
+
+  // Export / share: act on the same validated snapshot rendered above
+  const statusEl = container.querySelector('#exportStatus') as HTMLElement | null;
+  const setStatus = (text: string, ok: boolean) => {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.className = `export-status ${ok ? 'ok' : 'fail'}`;
+  };
+
+  container.querySelector('#btnShare')?.addEventListener('click', async () => {
+    const prep = prepareExport(chartData);
+    if (!prep.ok) {
+      setStatus(prep.errors[0] ?? '校验未通过，已阻止分享。', false);
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(prep.shareText);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = prep.shareText;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      setStatus('✅ 已复制与屏幕一致的分享文本。', true);
+    } catch {
+      setStatus('❌ 复制失败，请手动选择预览文本复制。', false);
+    }
+  });
+
+  container.querySelector('#btnExport')?.addEventListener('click', () => {
+    const prep = prepareExport(chartData);
+    if (!prep.ok || !prep.payload) {
+      setStatus(prep.errors[0] ?? '校验未通过，已阻止导出。', false);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(prep.payload, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = prep.fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`✅ 已导出 ${prep.fileName}（${prep.sizeBytes} 字节，校验通过）。`, true);
   });
 
   if (isModalOpen) {
@@ -367,8 +499,18 @@ export function renderWeatherApp(
         onCloseModal();
       }
     });
+    // Esc 关闭，焦点在输入控件上时不吞掉字符
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCloseModal();
+        document.removeEventListener('keydown', onKey);
+      }
+    };
+    document.addEventListener('keydown', onKey);
 
     container.querySelector('#btnSubmitModal')?.addEventListener('click', () => {
+      document.removeEventListener('keydown', onKey);
       handlers.onSubmitLog(selectedTag, selectedIntensity, noteText);
     });
   }

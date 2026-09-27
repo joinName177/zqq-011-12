@@ -1,39 +1,62 @@
 import { MoodRecord } from '../core/models';
 import { MoodRepositoryPort } from '../ports/mood-repository.port';
-import { createRecordFromTag } from '../core/meteorology-engine';
+import { createRecordFromTag, buildRecordWindow } from '../core/meteorology-engine';
+import { todayKey, toLocalDateKey } from '../core/format';
 
 const STORAGE_KEY = 'mood_meteorology_records_v1';
+const SAMPLE_FLAG_KEY = 'mood_meteorology_sample_v1';
 
 export class LocalStorageMoodAdapter implements MoodRepositoryPort {
+  /**
+   * 读取真实数据。返回值始终经过统一窗口清洗（排序 / 去重 / 边界收敛）。
+   * 仅当不存在任何真实标本时，才回退到内置示例序列，并显式打标，
+   * 使“降级示例数据”与“用户真实数据”边界清晰。
+   */
   getAll(): MoodRecord[] {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return this.resetToSample();
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const cleaned = buildRecordWindow(parsed);
+          if (cleaned.length > 0) return cleaned;
+        }
+      } catch {
+        // 损坏数据：清除并走示例降级，避免异常直接灌入界面
+        localStorage.removeItem(STORAGE_KEY);
       }
-    } catch {
-      // ignore
     }
     return this.resetToSample();
   }
 
+  /** 写入前统一归一化 + 同日覆盖，保证持久层与内存窗口口径一致 */
   add(record: MoodRecord): void {
-    const records = this.getAll();
-    // remove existing for same date if any
-    const filtered = records.filter(r => r.date !== record.date);
-    filtered.push(record);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    const incoming = buildRecordWindow([record]);
+    if (incoming.length === 0) return;
+    const fresh = incoming[0];
+
+    // 在已清洗的历史数据上做同日覆盖，避免旧版本脏数据导致重复键
+    let existing: MoodRecord[] = [];
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) existing = buildRecordWindow(parsed);
+      } catch {
+        existing = [];
+      }
+    }
+    const merged = existing.filter(r => r.date !== fresh.date).concat(fresh);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildRecordWindow(merged)));
+    localStorage.setItem(SAMPLE_FLAG_KEY, '0'); // 已产生真实数据
   }
 
   delete(id: string): void {
     const records = this.getAll().filter(r => r.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildRecordWindow(records)));
   }
 
+  /** 内置 14 天气象序列（降级 / 演示数据），日期统一使用本地时区 */
   resetToSample(): MoodRecord[] {
     const sampleSequence: { tag: string; intensity: number; note: string; daysAgo: number }[] = [
       { tag: '晴空万里', intensity: 8, note: '项目顺利交付，周末在公园草坪晒太阳看书', daysAgo: 13 },
@@ -55,11 +78,20 @@ export class LocalStorageMoodAdapter implements MoodRepositoryPort {
     const now = new Date();
     const records: MoodRecord[] = sampleSequence.map(item => {
       const d = new Date(now.getTime() - item.daysAgo * 86400000);
-      const dateStr = d.toISOString().split('T')[0];
-      return createRecordFromTag(item.tag, item.intensity, item.note, dateStr);
+      return createRecordFromTag(item.tag, item.intensity, item.note, toLocalDateKey(d));
     });
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    return records;
+    const windowed = buildRecordWindow(records);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(windowed));
+    localStorage.setItem(SAMPLE_FLAG_KEY, '1');
+    return windowed;
+  }
+
+  isSampleData(): boolean {
+    return localStorage.getItem(SAMPLE_FLAG_KEY) === '1';
+  }
+
+  static todayKey(): string {
+    return todayKey();
   }
 }

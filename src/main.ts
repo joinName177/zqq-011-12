@@ -2,17 +2,20 @@ import './ui/styles.css';
 import { LocalStorageMoodAdapter } from './adapters/local-storage-mood.adapter';
 import { MeteorologyEngineAdapter } from './adapters/meteorology-engine.adapter';
 import { createRecordFromTag } from './core/meteorology-engine';
-import { MoodRecord, SynopticChartData } from './core/models';
+import { MoodRecord } from './core/models';
 import { renderWeatherApp } from './ui/app';
 import { summarizeMood, chartSummary } from './core/mood-summary';
 import { moodTelemetry } from './adapters/mood-telemetry';
 import { buildBugSurface } from './adapters/quality/bugSurface';
+import { todayKey } from './core/format';
 
 const repo = new LocalStorageMoodAdapter();
 const metEngine = new MeteorologyEngineAdapter();
 
+// 唯一状态：全周期标本 + 当前选择身份。统计窗口恒定，不再按选择截断。
 let records = repo.getAll();
-let chartData: SynopticChartData = metEngine.generateSynopticChart(records);
+let focusRecordId: string | undefined;
+let chartData = metEngine.generateSynopticChart(records, focusRecordId);
 
 let isModalOpen = false;
 let selectedTag = '阴转多云';
@@ -32,6 +35,9 @@ rootEl.dataset.moodSummary = JSON.stringify({
 });
 
 function refreshView() {
+  // 天气图 / 气压带 / 季风 / 预警 / 导出 始终从同一份全周期窗口与同一身份派生
+  chartData = metEngine.generateSynopticChart(records, focusRecordId);
+
   renderWeatherApp(
     rootEl,
     chartData,
@@ -49,23 +55,25 @@ function refreshView() {
       },
       onResetData: () => {
         records = repo.resetToSample();
-        chartData = metEngine.generateSynopticChart(records);
+        focusRecordId = undefined;
         refreshView();
       },
       onSubmitLog: (tag: string, intensity: number, note: string) => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const newRecord = createRecordFromTag(tag, intensity, note, todayStr);
+        const newRecord = createRecordFromTag(tag, intensity, note, todayKey());
         repo.add(newRecord);
         records = repo.getAll();
-        chartData = metEngine.generateSynopticChart(records);
+        // 当日签到后，当前选择跟随到最新标本
+        focusRecordId = newRecord.id;
         isModalOpen = false;
         refreshView();
       },
       onSelectRecord: (record: MoodRecord) => {
-        // Re-generate chart focusing on this record
-        const filtered = records.filter(r => r.date <= record.date);
-        chartData = metEngine.generateSynopticChart(filtered.length > 0 ? filtered : records);
-        chartData.currentRecord = record;
+        // 仅切换“当前标本身份”；统计 / 气压带 / 季风窗口保持全周期不变
+        focusRecordId = record.id;
+        refreshView();
+      },
+      onFocusLatest: () => {
+        focusRecordId = undefined; // 缺省即由核心层回退到最新一条
         refreshView();
       }
     },
@@ -82,9 +90,23 @@ function refreshView() {
       refreshView();
     },
     (note: string) => {
+      // 长文本不触发整图重渲染，避免输入卡顿；容量保护由 textarea maxlength 兜底
       noteText = note;
     }
   );
+
+  // 摘要与屏幕同源，每次刷新同步，杜绝旧快照残留
+  rootEl.dataset.moodSummary = JSON.stringify({
+    summary: summarizeMood(records),
+    chart: chartSummary(chartData),
+    focusRecordId: chartData.focusRecordId,
+    windowSize: chartData.windowSize,
+    isEmpty: chartData.isEmpty,
+    telemetry: moodTelemetry('refresh'),
+    preembeddedBugCount: bugSurface.bugs.length,
+    hellBugCount: bugSurface.bugs.filter((bug) => bug.level === 'hell').length,
+    difficultBugCount: bugSurface.bugs.filter((bug) => bug.level === 'difficult').length
+  });
 }
 
 // Initial mount

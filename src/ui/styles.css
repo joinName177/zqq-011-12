@@ -592,3 +592,195 @@ body {
   gap: 12px;
   margin-top: 20px;
 }
+
+/* ===== 统一当前选择 / 空态 / 导出分享 ===== */
+.empty-banner {
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px dashed var(--met-cyan);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--met-text);
+}
+
+.focus-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  border: 1px solid var(--met-border);
+  background: var(--met-card);
+}
+
+.focus-bar.is-latest {
+  border-left: 3px solid var(--met-cyan);
+}
+
+.focus-bar.is-history {
+  border-left: 3px solid var(--met-gold);
+}
+
+.focus-bar-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.focus-sub {
+  color: var(--met-muted);
+  font-size: 12px;
+}
+
+.window-stat {
+  font-size: 12px;
+  color: var(--met-muted);
+  margin-bottom: 10px;
+}
+
+.panel-window-note {
+  font-size: 11px;
+  color: var(--met-muted);
+  margin: -8px 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--met-border);
+}
+
+.strip-empty {
+  flex: 1;
+  text-align: center;
+  color: var(--met-muted);
+  font-size: 12px;
+  padding: 18px;
+}
+
+/* record pills 现在是 button：重置原生按钮外观，复用卡片样式 */
+button.record-pill {
+  font-family: inherit;
+  color: var(--met-text);
+  width: 130px;
+}
+
+.record-pill:focus-visible,
+.tag-btn:focus-visible,
+.btn-reset:focus-visible,
+.btn-record-mood:focus-visible {
+  outline: 2px solid var(--met-cyan);
+  outline-offset: 2px;
+}
+
+.record-pill.active {
+  border-color: var(--met-cyan);
+  background: rgba(0, 240, 255, 0.12);
+  box-shadow: 0 0 0 1px var(--met-cyan) inset;
+}
+
+.synoptic-map-wrap.is-empty {
+  opacity: 0.55;
+}
+
+.alert-issued {
+  font-size: 11px;
+  color: var(--met-muted);
+  margin-bottom: 8px;
+}
+
+/* Export / share panel */
+.export-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--met-border);
+}
+
+.export-check.ok {
+  background: rgba(0, 240, 255, 0.08);
+  border-color: rgba(0, 240, 255, 0.4);
+}
+
+.export-check.fail {
+  background: rgba(255, 0, 84, 0.1);
+  border-color: var(--met-red);
+}
+
+.check-meta {
+  color: var(--met-muted);
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.export-msgs {
+  list-style: none;
+  font-size: 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.export-msgs.err li {
+  color: var(--met-red);
+}
+
+.export-msgs.warn li {
+  color: var(--met-gold);
+}
+
+.export-preview summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--met-cyan);
+  margin-bottom: 8px;
+}
+
+.share-text {
+  background: #070d18;
+  border: 1px solid var(--met-border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--met-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.export-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.export-status {
+  margin-top: 10px;
+  font-size: 12px;
+  min-height: 16px;
+}
+
+.export-status.ok {
+  color: var(--met-cyan);
+}
+
+.export-status.fail {
+  color: var(--met-red);
+}

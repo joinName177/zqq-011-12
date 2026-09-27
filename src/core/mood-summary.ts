@@ -1,9 +1,31 @@
 import type { MoodRecord, SynopticChartData } from './models';
-export interface MoodSummary { count: number; averageIntensity: number; tags: string[]; dominant: string; }
-export function summarizeMood(records: readonly MoodRecord[]): MoodSummary {
-  const count = records.length; const averageIntensity = count ? Math.round(records.reduce((sum, record) => sum + record.intensity, 0) / count * 10) / 10 : 0;
-  const tags = [...new Set(records.map((record) => record.tag))];
-  const dominant = tags.sort((a, b) => records.filter((record) => record.tag === b).length - records.filter((record) => record.tag === a).length)[0] ?? '暂无';
-  return { count, averageIntensity, tags, dominant };
+import { computeStatistics } from './meteorology-engine';
+
+export interface MoodSummary {
+  count: number;
+  averageIntensity: number;
+  tags: string[];
+  dominant: string;
 }
-export function chartSummary(chart: SynopticChartData): string { return chart.currentRecord.tag + ' · ' + chart.zones.length + ' 个气压带'; }
+
+/**
+ * 摘要与天气图 / 气压带 / 导出共用 computeStatistics 的同一口径，
+ * 不再独立实现频次排序与舍入。
+ */
+export function summarizeMood(records: readonly MoodRecord[]): MoodSummary {
+  const s = computeStatistics(records);
+  return {
+    count: s.recordCount,
+    averageIntensity: s.averageIntensity,
+    tags: s.tags,
+    dominant: s.recordCount === 0 ? '暂无' : s.dominantTag
+  };
+}
+
+/** 一句话摘要必须显式带上“当前选择身份 + 统一窗口大小”，避免与详情串线 */
+export function chartSummary(chart: SynopticChartData): string {
+  const focus = chart.isEmpty
+    ? '暂无标本'
+    : `${chart.currentRecord.date} ${chart.currentRecord.tag}`;
+  return `${focus} · 全窗口 ${chart.windowSize} 条标本 · ${chart.zones.length} 个气压带`;
+}
